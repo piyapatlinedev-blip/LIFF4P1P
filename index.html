@@ -3,106 +3,207 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My Random Image Generator</title>
-    <!-- Include LIFF SDK -->
+    <title>Interactive Image Generator</title>
     <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <style>
         body, html {
             margin: 0; padding: 0; height: 100%;
-            display: flex; justify-content: center; align-items: center;
+            display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
             background-size: cover; background-position: center;
-            background-repeat: no-repeat;
+            background-attachment: fixed;
             font-family: sans-serif;
         }
+
+        /* Control Panel */
+        .controls {
+            display: flex; gap: 10px; margin-bottom: 10px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px; border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            z-index: 10;
+        }
+        button {
+            padding: 10px 15px; border: none; border-radius: 6px;
+            background: #333; color: white; font-weight: bold;
+            cursor: pointer; transition: 0.2s;
+        }
+        button:active { transform: scale(0.95); }
+        button:disabled { background: #999; cursor: not-allowed; transform: none; }
+
+        /* Status Indicator */
+        #action-status {
+            height: 20px; color: white; font-weight: bold;
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
+            margin-bottom: 10px; z-index: 10;
+        }
+
+        /* Image Grid */
         .image-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-            padding: 20px;
-            background: rgba(255, 255, 255, 0.85); /* White overlay to make foreground pop */
-            border-radius: 15px;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+            display: grid; grid-template-columns: 1fr 1fr; gap: 15px;
+            padding: 20px; background: rgba(255, 255, 255, 0.85);
+            border-radius: 15px; box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+            z-index: 10;
         }
-        .image-grid img {
-            width: 120px; height: 120px;
-            object-fit: cover; border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+
+        /* Individual Image Containers */
+        .img-container {
+            position: relative; width: 120px; height: 120px;
+            border-radius: 10px; border: 4px solid navy; 
+            transition: all 0.2s ease-in-out; cursor: pointer;
+            overflow: hidden; background: #eee;
         }
-        #loading { 
-            font-size: 1.2rem;
-            font-weight: bold;
-            background: white;
-            padding: 10px 20px;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+
+        /* Locked State */
+        .img-container.locked { border-color: crimson; transform: scale(0.90); }
+        .img-container img { width: 100%; height: 100%; object-fit: cover; }
+
+        /* Lock Emoji */
+        .lock-icon {
+            display: none; position: absolute;
+            top: 5px; right: 5px; font-size: 20px;
+            background: rgba(255,255,255,0.8); border-radius: 50%;
+            padding: 2px; line-height: 1;
         }
-        #error-msg {
-            color: red;
-            background: white;
-            padding: 10px;
-            border-radius: 8px;
-            display: none;
+        .img-container.locked .lock-icon { display: block; }
+
+        #loading, #error-msg {
+            background: white; padding: 15px 25px;
+            border-radius: 8px; font-weight: bold; z-index: 10;
         }
+        #error-msg { color: red; display: none; }
+        #app-content { display: none; flex-direction: column; align-items: center; }
     </style>
 </head>
 <body>
 
-    <div id="loading">Loading your images... Please wait.</div>
+    <div id="loading">Initializing App... Please wait.</div>
     <div id="error-msg"></div>
     
-    <div class="image-grid" id="grid" style="display: none;">
-        <!-- Images will be injected here -->
+    <div id="app-content">
+        <!-- Control Panel -->
+        <div class="controls">
+            <button id="btn-all" onclick="randomize('all')">All Random</button>
+            <button id="btn-bg" onclick="randomize('bg')">Bg Random</button>
+            <button id="btn-fg" onclick="randomize('fg')">4 Images Random</button>
+        </div>
+
+        <div id="action-status"></div> <!-- Shows "Loading..." when fetching -->
+
+        <!-- 4 Images Grid -->
+        <div class="image-grid" id="grid">
+            <!-- Rendered via JS -->
+        </div>
     </div>
 
     <script>
-        // Your actual GAS URL
+        // REPLACE WITH YOUR ACTUAL GAS URL
         const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwwUIzo1HhFgLLZRcR7AhqIAmNNdbsD8XDYBquagf6QaeRI5xLiIj9YZ_ALGRBZGTlj3w/exec';
+        
+        let currentForegrounds = [
+            { url: "", locked: false },
+            { url: "", locked: false },
+            { url: "", locked: false },
+            { url: "", locked: false }
+        ];
 
         async function initializeApp() {
             try {
-                // Initialize LIFF - REPLACE THIS WITH YOUR LIFF ID
-                await liff.init({ liffId: "2010069035-mnQW6x9O" });
+                // Initialize LIFF - REPLACE WITH YOUR LIFF ID
+                await liff.init({ liffId: "YOUR_LIFF_ID_HERE" });
                 
-                // Fetch data from Google Apps Script
-                const response = await fetch(GAS_WEB_APP_URL);
-                const data = await response.json();
-
-                if(data.status === 'success') {
-                    renderImages(data);
-                } else {
-                    showError("Error loading images: " + data.message);
-                }
+                // Trigger the first load
+                await randomize('all');
+                
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('app-content').style.display = 'flex';
             } catch (err) {
-                showError("Initialization failed. Please try again.");
-                console.error(err);
+                showError("Failed to initialize: " + err.message);
             }
         }
 
-        function renderImages(data) {
-            // Set Background
-            document.body.style.backgroundImage = `url('${data.background}')`;
+        async function randomize(type) {
+            // 1. Update UI to show loading state
+            setLoadingState(true);
 
-            // Hide loading, show grid
-            document.getElementById('loading').style.display = 'none';
+            try {
+                // 2. Fetch fresh images from Google Drive
+                const response = await fetch(GAS_WEB_APP_URL);
+                const data = await response.json();
+
+                if(data.status !== 'success') {
+                    throw new Error(data.message);
+                }
+
+                // 3. Apply the Background if requested
+                if (type === 'all' || type === 'bg') {
+                    document.body.style.backgroundImage = `url('${data.background}')`;
+                }
+
+                // 4. Apply the Foregrounds if requested (Respecting Locks!)
+                if (type === 'all' || type === 'fg') {
+                    let fetchIndex = 0; // We have 4 fresh images from GAS
+                    
+                    for (let i = 0; i < 4; i++) {
+                        // Only replace the image URL if it is NOT locked
+                        if (!currentForegrounds[i].locked) {
+                            currentForegrounds[i].url = data.foregrounds[fetchIndex];
+                            fetchIndex++; // Move to the next fresh image
+                        }
+                    }
+                }
+
+                // 5. Redraw the grid
+                renderGrid();
+
+            } catch (error) {
+                alert("Error fetching new images: " + error.message);
+            } finally {
+                // 6. Restore UI buttons
+                setLoadingState(false);
+            }
+        }
+
+        // Helper to manage UI during the 2-3 second wait
+        function setLoadingState(isLoading) {
+            const buttons = document.querySelectorAll('.controls button');
+            buttons.forEach(btn => btn.disabled = isLoading);
+            
+            const statusText = document.getElementById('action-status');
+            statusText.innerText = isLoading ? "🎲 Fetching new images..." : "";
+        }
+
+        // Toggle lock state when image is clicked
+        function toggleLock(index) {
+            currentForegrounds[index].locked = !currentForegrounds[index].locked;
+            renderGrid();
+        }
+
+        // Build the HTML for the 4 images based on current state
+        function renderGrid() {
             const grid = document.getElementById('grid');
-            grid.style.display = 'grid';
+            grid.innerHTML = ''; // clear existing
 
-            // Insert 4 foreground images
-            data.foregrounds.forEach(imgUrl => {
-                const imgElement = document.createElement('img');
-                imgElement.src = imgUrl;
-                grid.appendChild(imgElement);
+            currentForegrounds.forEach((item, index) => {
+                const div = document.createElement('div');
+                div.className = `img-container ${item.locked ? 'locked' : ''}`;
+                div.onclick = () => toggleLock(index);
+
+                div.innerHTML = `
+                    <img src="${item.url}" alt="Random Image">
+                    <div class="lock-icon">🔒</div>
+                `;
+                grid.appendChild(div);
             });
         }
 
-        function showError(message) {
+        function showError(msg) {
             document.getElementById('loading').style.display = 'none';
-            const errorDiv = document.getElementById('error-msg');
-            errorDiv.style.display = 'block';
-            errorDiv.innerText = message;
+            const errDiv = document.getElementById('error-msg');
+            errDiv.style.display = 'block';
+            errDiv.innerText = msg;
         }
 
-        // Start the app
         initializeApp();
     </script>
 </body>
